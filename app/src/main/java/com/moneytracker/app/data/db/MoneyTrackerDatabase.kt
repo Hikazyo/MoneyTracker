@@ -15,6 +15,12 @@ import com.moneytracker.app.data.db.entity.CategoryEntity
 import com.moneytracker.app.data.db.entity.MonthlyBudgetEntity
 import com.moneytracker.app.data.db.entity.TransactionEntity
 import com.moneytracker.app.data.model.TransactionType
+import com.moneytracker.app.data.security.DatabaseEncryption
+import com.moneytracker.app.data.security.DatabasePassphrase
+import com.moneytracker.app.data.security.DatabaseUnreadableException
+import com.moneytracker.app.data.security.EncryptionMigrationResult
+import com.moneytracker.app.data.security.PassphraseResult
+import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 
 @Database(
   entities =
@@ -39,23 +45,67 @@ abstract class MoneyTrackerDatabase : RoomDatabase() {
   companion object {
     const val DB_NAME = "moneytracker.db"
 
-    fun build(context: Context): MoneyTrackerDatabase =
-      Room.databaseBuilder(context.applicationContext, MoneyTrackerDatabase::class.java, DB_NAME)
+    /**
+     * 生产环境建库。
+     *
+     * 加密在这里接入，而不是散在各个调用点——**建库是唯一的必经之路**，
+     * 只要守住它，就不存在「某条路径忘了加密」的可能。
+     *
+     * 顺序很重要：
+     *  1. 先确认口令可用（解不开且库还在 → 直接抛错，绝不静默重建）
+     *  2. 加载 SQLCipher 原生库
+     *  3. 把可能存在的**明文**老库转换成加密库（v1.2 → v1.3 的升级路径）
+     *  4. 最后才让 Room 建库，此后它看到的已经是加密文件
+     */
+    fun build(context: Context): MoneyTrackerDatabase {
+      val databaseExists = context.getDatabasePath(DB_NAME).exists()
+
+      val passphrase =
+        when (val result = DatabasePassphrase.resolve(context, databaseExists)) {
+          is PassphraseResult.Ready -> result.passphrase
+          PassphraseResult.Unrecoverable ->
+            // 必须在这里失败得响亮。若「重新生成一个口令继续跑」，用户会看到一个空账本，
+            // 以为数据被弄丢了——而实际上旧数据还躺在磁盘上，只是再也解不开。
+            throw DatabaseUnreadableException(null)
+        }
+
+      DatabaseEncryption.loadLibrary()
+
+      when (val migration = DatabaseEncryption.migrateIfNeeded(context, DB_NAME, passphrase)) {
+        is EncryptionMigrationResult.Failed ->
+          // 迁移失败时原库已回滚到明文状态，而 Room 会按加密库去打开它，必然失败。
+          // 因此这里直接抛错并带上原因，而不是让它以一句看不懂的 SQLite 报错崩掉。
+          throw IllegalStateException("账本加密失败：${migration.reason}")
+        else -> Unit
+      }
+
+      return Room.databaseBuilder(context.applicationContext, MoneyTrackerDatabase::class.java, DB_NAME)
+        .openHelperFactory(SupportOpenHelperFactory(passphrase.toByteArray(Charsets.UTF_8)))
         .addCallback(SeedCallback)
         .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
         .build()
+    }
 
     /**
      * 内存库构造，供仪器测试使用。
      *
      * 刻意复用同一个 [SeedCallback]：若测试自己建库而漏掉回调，
      * 测试跑的建库路径就与生产不一致，种子数据的问题将测不出来。
+     *
+     * 内存库同样走 SQLCipher：加密是生产路径的一部分，
+     * 测试若跑在明文驱动上，就等于没测到真正的实现。
      */
-    fun buildInMemory(context: Context): MoneyTrackerDatabase =
-      Room.inMemoryDatabaseBuilder(context, MoneyTrackerDatabase::class.java)
+    fun buildInMemory(context: Context, passphrase: String = TEST_PASSPHRASE): MoneyTrackerDatabase {
+      DatabaseEncryption.loadLibrary()
+      return Room.inMemoryDatabaseBuilder(context, MoneyTrackerDatabase::class.java)
+        .openHelperFactory(SupportOpenHelperFactory(passphrase.toByteArray(Charsets.UTF_8)))
         .addCallback(SeedCallback)
         .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
         .build()
+    }
+
+    /** 仅供仪器测试使用的固定口令。 */
+    const val TEST_PASSPHRASE = "0123456789abcdef0123456789abcdef"
 
     /**
      * v1 → v2：账目表新增 `sourceId`（外部账单来源标识）并建唯一索引。

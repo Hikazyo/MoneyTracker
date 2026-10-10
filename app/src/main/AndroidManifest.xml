@@ -1,9 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!--
+      备份策略：账本**不参与**系统备份与换机迁移。
+
+      allowBackup="false" 关掉 Google 云备份；两个 rules 文件负责把数据库与偏好
+      排除在云备份与 D2D 迁移之外（原因见 res/xml/data_extraction_rules.xml 的注释）。
+      只写 allowBackup="false" 是不够的——它管不到换机迁移。
+
+      本应用自带「创建备份 / 从备份恢复」，用户换机时用它，不依赖系统迁移。
+    -->
     <application
         android:name=".MoneyTrackerApp"
-        android:allowBackup="true"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"

@@ -26,6 +26,10 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -77,6 +81,11 @@ fun SettingsScreen(
   val importState by importViewModel.state.collectAsStateWithLifecycle()
 
   // SAF：让用户自己选文件，因此完全不需要申请存储权限
+  // 备份口令要跨越「弹对话框 → 起文件选择器 → 拿到 URI」这一串异步步骤，
+  // 所以先用一个局部状态接住它。口令只活在内存里，不写任何存储。
+  var pendingBackupPassword by remember { mutableStateOf<String?>(null) }
+  var showBackupPasswordDialog by remember { mutableStateOf(false) }
+
   val createCsvLauncher =
     rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
       uri?.let { viewModel.exportCsv(it.toString()) }
@@ -85,7 +94,8 @@ fun SettingsScreen(
     rememberLauncherForActivityResult(
       ActivityResultContracts.CreateDocument("application/json")
     ) { uri ->
-      uri?.let { viewModel.createBackup(it.toString()) }
+      uri?.let { viewModel.createBackup(it.toString(), pendingBackupPassword) }
+      pendingBackupPassword = null
     }
   val openBackupLauncher =
     rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -115,7 +125,8 @@ fun SettingsScreen(
     onPickImportFile = { importLauncher.launch(IMPORT_MIME_TYPES) },
     onImportMessageShown = importViewModel::onMessageShown,
     onExportCsv = { createCsvLauncher.launch(viewModel.suggestedCsvName) },
-    onCreateBackup = { createBackupLauncher.launch(viewModel.suggestedBackupName) },
+    // 先问口令再选保存位置：编码时需要口令，而且先设口令的交互顺序更自然
+    onCreateBackup = { showBackupPasswordDialog = true },
     onPickBackup = {
       // 只接受 JSON 与 octet-stream：加了 "*/*" 会把导出的 CSV 也列进来，用户很容易误选。
       // 保留 octet-stream 是因为部分文件提供方对 .json 上报的就是这个类型。
@@ -126,6 +137,26 @@ fun SettingsScreen(
     onMessageShown = viewModel::onMessageShown,
     modifier = modifier,
   )
+
+  if (showBackupPasswordDialog) {
+    CreateBackupPasswordDialog(
+      onDismiss = { showBackupPasswordDialog = false },
+      onConfirm = { password ->
+        showBackupPasswordDialog = false
+        pendingBackupPassword = password
+        createBackupLauncher.launch(viewModel.suggestedBackupName)
+      },
+    )
+  }
+
+  // 选中的是加密备份 → 先要口令；口令错误时界面保留输入并提示，可以就地重试
+  if (state.awaitingBackupPassword != null) {
+    RestoreBackupPasswordDialog(
+      wrongPassword = state.lastBackupPasswordWrong,
+      onDismiss = viewModel::dismissBackupPasswordPrompt,
+      onConfirm = viewModel::submitBackupPassword,
+    )
+  }
 
   importState.preview?.let { preview ->
     ImportPreviewDialog(

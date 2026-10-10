@@ -1,5 +1,6 @@
 // 必须显式 import：在 .kts 构建脚本里，`java` 会优先解析成 Gradle 的 Java 插件扩展，
 // 直接写 java.util.Properties 会报 Unresolved reference 'util'
+import java.io.File
 import java.util.Properties
 
 plugins {
@@ -10,15 +11,34 @@ plugins {
   alias(libs.plugins.room)
 }
 
-// 发布签名从 keystore.properties 读取（该文件不入版本库，见 .gitignore）。
-// 文件不存在时回退到 debug 签名，保证其他人 clone 之后仍然能构建。
-val keystorePropertiesFile = rootProject.file("keystore.properties")
+// 发布签名从工程**外部**读取，按优先级尝试三个位置：
+//
+//   1. -Pkeystore.properties=<路径>      显式指定（CI 用）
+//   2. ~/.android-keys/moneytracker/     推荐位置，密钥不在工程目录里
+//   3. <工程根>/keystore.properties       兼容旧布局
+//
+// 为什么默认放在工程外：密钥只要躺在工程目录里，就迟早会被某个打包命令
+// （zip/rar/发给别人看代码）一起带走。本项目就发生过一次——分发包里同时含
+// 私钥与明文口令，拿到的人可以签出被系统认可的「升级包」。把密钥移出工程，
+// 这类事故就不必依赖每个人的记性来避免。
+//
+// 三个位置都没有时回退到 debug 签名，保证其他人 clone 之后仍然能构建。
+val keystorePropertiesFile: File? =
+    run {
+        val explicit = (findProperty("keystore.properties") as String?)?.let(::file)
+        val external =
+            File(System.getProperty("user.home"), ".android-keys/moneytracker/keystore.properties")
+        val legacy = rootProject.file("keystore.properties")
+        listOfNotNull(explicit, external, legacy).firstOrNull { it.exists() }
+    }
+
 val keystoreProperties =
     Properties().apply {
-        if (keystorePropertiesFile.exists()) {
-            keystorePropertiesFile.inputStream().use { load(it) }
-        }
+        keystorePropertiesFile?.inputStream()?.use { load(it) }
     }
+
+/** 密钥库路径以 keystore.properties 所在目录为基准，这样整个密钥目录可以整体搬走。 */
+val keystoreDir: File? = keystorePropertiesFile?.parentFile
 
 android {
     namespace = "com.moneytracker.app"
@@ -29,17 +49,21 @@ android {
         applicationId = "com.moneytracker.app"
         minSdk = 24
         targetSdk = 36
-        versionCode = 3
-        versionName = "1.2"
+        versionCode = 4
+        versionName = "1.3"
     }
 
     signingConfigs {
-        if (keystorePropertiesFile.exists()) {
+        if (keystorePropertiesFile != null) {
             create("release") {
-                storeFile = rootProject.file(keystoreProperties.getProperty("storeFile"))
+                storeFile = File(keystoreDir, keystoreProperties.getProperty("storeFile"))
                 storePassword = keystoreProperties.getProperty("storePassword")
                 keyAlias = keystoreProperties.getProperty("keyAlias")
                 keyPassword = keystoreProperties.getProperty("keyPassword")
+                // 启用 v3 签名。v2 在 minSdk 24 上已经够用，v3 的价值在于**密钥轮换**：
+                // 没有它，一旦需要换签就只能让所有用户卸载重装。
+                enableV3Signing = true
+                enableV4Signing = true
             }
         }
     }
@@ -52,7 +76,7 @@ android {
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig =
-                if (keystorePropertiesFile.exists()) {
+                if (keystorePropertiesFile != null) {
                     signingConfigs.getByName("release")
                 } else {
                     signingConfigs.getByName("debug")
@@ -142,6 +166,9 @@ dependencies {
   implementation(libs.androidx.room.runtime)
   implementation(libs.androidx.room.ktx)
   ksp(libs.androidx.room.compiler)
+
+  // 数据库加密：账本以 SQLCipher 加密后落盘（口令由 Android Keystore 保管）
+  implementation(libs.sqlcipher.android)
 
   // minSdk 24 上使用 java.time 所需的脱糖库
   coreLibraryDesugaring(libs.desugar.jdk.libs)

@@ -1,19 +1,36 @@
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample data extraction rules file; uncomment and customize as necessary.
-   See https://developer.android.com/about/versions/12/backup-restore#xml-changes
-   for details.
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+（API 31+）的备份与迁移规则。
+
+  这里的作用不是「配置备份内容」，而是**明确排除账本数据**。
+
+  为什么不能留空：备份规则缺失时系统按「全量备份」处理，
+  /data/data/com.moneytracker.app/ 下的账本数据库会进入 Google 云备份，
+  以及换机迁移（D2D）。这与应用里「数据只存在本机」的承诺是冲突的，
+  而且系统备份进程**不需要应用拥有 INTERNET 权限**就能把数据传出去。
+
+  两个必须知道的点：
+
+  1. allowBackup="false" 只关闭云备份，**不关闭换机迁移（D2D）**。
+     想连换机迁移一起挡住，只能靠下面的 <device-transfer>。
+  2. <cloud-backup> 里的 include/exclude 对 D2D 不生效，D2D 只受
+     <device-transfer> 控制。所以两段都要写。
+
+  本应用自带「创建备份 / 从备份恢复」（导出一个 JSON 文件，由用户自己保管），
+  换机时用它即可，不必依赖系统迁移。
 -->
 <data-extraction-rules>
-    <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
-    </cloud-backup>
-    <!--
-    <device-transfer>
-        <include .../>
-        <exclude .../>
-    </device-transfer>
-    -->
+  <cloud-backup>
+    <exclude domain="database" path="." />
+    <exclude domain="sharedpref" path="." />
+    <exclude domain="file" path="." />
+    <exclude domain="root" path="." />
+  </cloud-backup>
+
+  <device-transfer>
+    <exclude domain="database" path="." />
+    <exclude domain="sharedpref" path="." />
+    <exclude domain="file" path="." />
+    <exclude domain="root" path="." />
+  </device-transfer>
 </data-extraction-rules>

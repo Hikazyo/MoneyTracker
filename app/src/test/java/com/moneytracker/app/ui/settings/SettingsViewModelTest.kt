@@ -94,12 +94,12 @@ class SettingsViewModelTest {
     val documents = FakeDocumentStore()
     val viewModel = viewModel(documents = documents)
 
-    viewModel.createBackup("content://docs/2")
+    viewModel.createBackup("content://docs/2", password = null)
     advance()
 
     val written = documents.contentOf("content://docs/2")!!
     assertTrue(written.contains("\"schemaVersion\": ${BackupCodec.CURRENT_SCHEMA_VERSION}"))
-    assertEquals("已备份 2 笔账目", viewModel.state.value.message)
+    assertEquals("已备份 2 笔账目（未加密）", viewModel.state.value.message)
   }
 
   // ---------- 恢复：必须先确认 ----------

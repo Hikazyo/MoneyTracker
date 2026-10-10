@@ -1,6 +1,8 @@
 package com.moneytracker.app.data.importer
 
 import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.io.IOException
 import java.io.InputStream
 import java.util.zip.ZipInputStream
 import javax.xml.parsers.SAXParserFactory
@@ -39,6 +41,25 @@ object XlsxReader {
   /** 列数上限，挡住 `r="XFD1048576"` 这类合法但离谱的坐标。 */
   private const val MAX_COLUMNS = 256
 
+  /**
+   * 单个 ZIP 条目**解压后**的字节上限：32 MB。
+   *
+   * 必须限制的是解压后的体积，而不是压缩包本身的大小：xlsx 是 ZIP，
+   * 一个几十 KB 的压缩包可以膨胀成几 GB（压缩炸弹），而 `readBytes()`
+   * 会老老实实把它全部读进内存。这是本项目里唯一一处
+   * 「用户随手选一个文件就能让应用崩掉」的路径。
+   */
+  private const val MAX_ENTRY_BYTES = 32L * 1024 * 1024
+
+  /**
+   * 共享字符串条数上限。
+   *
+   * 这张表是**无差别整表加载**的（不像工作表那样按行截断），
+   * 因此它是 xlsx 路径上最容易失控的结构。20 万条远超任何真实账单的需要：
+   * 微信的年度账单通常在几千条量级。
+   */
+  private const val MAX_SHARED_STRINGS = 200_000
+
   private const val ENTRY_WORKBOOK = "xl/workbook.xml"
   private const val ENTRY_RELS = "xl/_rels/workbook.xml.rels"
   private const val ENTRY_SHARED_STRINGS = "xl/sharedStrings.xml"
@@ -64,9 +85,9 @@ object XlsxReader {
     forEachEntry(bytes) { name, stream ->
       names.add(name)
       when (name) {
-        ENTRY_WORKBOOK -> workbookXml = stream.readBytes()
-        ENTRY_RELS -> relsXml = stream.readBytes()
-        ENTRY_SHARED_STRINGS -> sharedXml = stream.readBytes()
+        ENTRY_WORKBOOK -> workbookXml = stream.readBounded()
+        ENTRY_RELS -> relsXml = stream.readBounded()
+        ENTRY_SHARED_STRINGS -> sharedXml = stream.readBounded()
         else -> Unit
       }
     }
@@ -233,7 +254,9 @@ object XlsxReader {
         "t" -> capturing = false
         "rPh" -> inPhonetic = false
         "si" -> {
-          strings.add(current.toString())
+          // 超限时停止累积而不是抛错：已经读到的部分仍然可用，
+          // 上层的行数/列数上限会继续兜住后续处理
+          if (strings.size < MAX_SHARED_STRINGS) strings.add(current.toString())
           inItem = false
         }
       }
@@ -386,20 +409,65 @@ object XlsxReader {
     // 关键：解析器读完会**关闭**传入的流，而这里传进来的是 ZIP 的流。
     // 不加这层包装的话，解析完工作表之后再取下一个条目就会抛
     // 「Stream closed」，整个读取直接失败。
-    reader.parse(InputSource(NonClosingStream(stream)))
+    reader.parse(InputSource(BoundedNonClosingStream(stream, MAX_ENTRY_BYTES)))
   }
 
-  /** 只屏蔽 close()，其余原样转发，用来把流的生命周期留在自己手里。 */
-  private class NonClosingStream(private val delegate: InputStream) : InputStream() {
-    override fun read(): Int = delegate.read()
+  /**
+   * 只屏蔽 close()，并限制可读字节数，其余原样转发。
+   *
+   * 关流：解析器读完会关闭传入的流，而这里传进来的是 ZIP 的流。不加这层包装，
+   * 解析完工作表之后再取下一个条目就会抛 `Stream closed`。
+   *
+   * 限流：工作表条目在解析过程中才会暴露真实体积，只能在读取时计数。
+   */
+  private class BoundedNonClosingStream(
+    private val delegate: InputStream,
+    private val limit: Long,
+  ) : InputStream() {
+    private var consumed = 0L
 
-    override fun read(b: ByteArray, off: Int, len: Int): Int = delegate.read(b, off, len)
+    private fun account(count: Int) {
+      if (count <= 0) return
+      consumed += count
+      if (consumed > limit) {
+        throw IOException("表格数据超过 ${limit / 1024 / 1024} MB 上限，已中止解析")
+      }
+    }
+
+    override fun read(): Int {
+      val byte = delegate.read()
+      if (byte >= 0) account(1)
+      return byte
+    }
+
+    override fun read(b: ByteArray, off: Int, len: Int): Int {
+      val count = delegate.read(b, off, len)
+      account(count)
+      return count
+    }
 
     override fun available(): Int = delegate.available()
 
     override fun close() {
       // 故意不关闭 delegate
     }
+  }
+
+  /** 有上限地读完一个条目。 */
+  private fun InputStream.readBounded(): ByteArray {
+    val buffer = ByteArray(64 * 1024)
+    val out = ByteArrayOutputStream()
+    var total = 0L
+    while (true) {
+      val read = read(buffer)
+      if (read < 0) break
+      total += read
+      if (total > MAX_ENTRY_BYTES) {
+        throw IOException("表格条目超过 ${MAX_ENTRY_BYTES / 1024 / 1024} MB 上限")
+      }
+      out.write(buffer, 0, read)
+    }
+    return out.toByteArray()
   }
 
   /**

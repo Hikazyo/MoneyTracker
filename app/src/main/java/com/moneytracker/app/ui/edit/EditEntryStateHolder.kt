@@ -20,6 +20,13 @@ data class CategoryChip(
   val name: String,
   val iconKey: String,
   val isSelected: Boolean,
+  /**
+   * 这个分类已被归档。
+   *
+   * 只可能出现在「编辑一笔原本就属于该归档分类的账目」这一种情况，
+   * 界面据此加一句说明，让用户知道为什么列表里会有一个已归档的分类。
+   */
+  val isArchived: Boolean = false,
 )
 
 data class EditEntryUiState(
@@ -82,8 +89,10 @@ class EditEntryStateHolder(
           selectedCategoryId = existing.categoryId
         }
       }
-      // 分类表变化（用户新增/归档分类）也会自动反映到界面
-      repository.observeCategories().collect { categories ->
+      // 分类表变化（用户新增/归档分类）也会自动反映到界面。
+      // 用**含已归档**的那份：归档一个分类之后，属于它的历史账目在编辑时
+      // 仍要能认出自己的分类，否则一保存就会被换成别的分类。
+      repository.observeAllCategories().collect { categories ->
         allCategories = categories
         refresh()
       }
@@ -189,12 +198,19 @@ class EditEntryStateHolder(
    * 金额显示这些互相依赖的派生字段始终一致，避免出现「按钮可点但保存失败」这类不同步问题。
    */
   private fun refresh() {
-    val visible = allCategories.filter { it.type == type }
+    // 注意这里用的是**含已归档**的分类表。若只用未归档的那份，下面这段逻辑
+    // 就会在「账目所属分类已被归档」时把它当成非法值，静默换成第一个分类——
+    // 用户只想改个备注，分类却被改掉了，历史统计随之失真。
+    val sameDirection = allCategories.filter { it.type == type }
 
     // 切换收支方向后，原先选中的分类可能已不属于当前方向，需要重新挑选
-    if (visible.none { it.id == selectedCategoryId }) {
-      selectedCategoryId = visible.firstOrNull()?.id
+    if (sameDirection.none { it.id == selectedCategoryId }) {
+      selectedCategoryId = sameDirection.firstOrNull { !it.isArchived }?.id
     }
+
+    // 已归档的分类**只在该笔账目原本就属于它时**才出现在候选里。
+    // 这样既能原样保存、不改动分类，又不会把已归档的分类重新塞回可选列表。
+    val visible = sameDirection.filter { !it.isArchived || it.id == selectedCategoryId }
     val selected = selectedCategoryId
     val minor = Money.parse(amount)
 
@@ -206,7 +222,16 @@ class EditEntryStateHolder(
         note = note,
         dateLabel =
           LedgerFormatter.dateLabel(Instant.ofEpochMilli(occurredAt).atZone(zone).toLocalDate()),
-        categories = visible.map { CategoryChip(it.id, it.name, it.iconKey, it.id == selected) },
+        categories =
+          visible.map {
+            CategoryChip(
+              id = it.id,
+              name = it.name,
+              iconKey = it.iconKey,
+              isSelected = it.id == selected,
+              isArchived = it.isArchived,
+            )
+          },
         canSave = minor != null && minor > 0L && selected != null,
         finished = _state.value.finished,
         errorMessage = null,

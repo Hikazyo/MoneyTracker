@@ -68,8 +68,20 @@ $c = [System.IO.File]::ReadAllText($p, [System.Text.Encoding]::UTF8)
 [System.IO.File]::WriteAllText($p, $c, (New-Object System.Text.UTF8Encoding($true)))
 ```
 
+### 更省事的办法：脚本里的字符串字面量全用 ASCII
+
+BOM 很容易在编辑过程中被工具悄悄抹掉（本项目用的 `edit`/`write` 工具就会），
+而一旦被抹掉，脚本就**无法运行**，报的还是一句看不懂的语法错误。
+
+所以新脚本（如 `tools/make-dist.ps1`）一律遵循：**所有字符串字面量用英文，
+中文只出现在 `#` 注释里**。理由是这样处理之后，无论有没有 BOM 都能正常跑：
+
+- 中文字符串被错误解码时，其中的字节可能被当成引号，直接破坏语法
+- 中文注释被错误解码**无害**——注释到行尾就结束了，不影响解析
+
 顺带一提：`npm`/`pnpm` 的 `.ps1` 包装脚本在本机被执行策略拦住，
 在 PowerShell 里要用 `npm.cmd`，或先 `Set-ExecutionPolicy -Scope Process Bypass`。
+自己写的脚本用 `powershell -ExecutionPolicy Bypass -File <路径>` 调用即可。
 
 ### 读取文件时同样要显式指定编码（这个坑踩了两次）
 
@@ -514,6 +526,97 @@ adb logcat -d -s AndroidRuntime:E  # 应该没有任何 Room/SQLite 报错
 **同一签名 + 更高 versionCode 就能直接覆盖安装**，不需要卸载——也正因如此，
 签名文件丢失意味着用户永远无法升级。
 
+---
+
+## 十七、给数据库加密时踩到的坑（v1.3）
+
+这一节是本次加密改造里**只有实测才会发现**的几件事。每一条都会让「看起来正常的实现」
+产出错误结果，而且大多不报错。
+
+### sqlcipher_export 不复制 `PRAGMA user_version`（最严重）
+
+`sqlcipher_export` 复制的是**表结构与数据**，而 `user_version` 是数据库头部的字段，
+不是表，因此被丢掉了。后果：
+
+```
+明文库 user_version = 3（Room 的 schema 版本）
+      ↓ sqlcipher_export
+加密库 user_version = 0
+      ↓ Room 打开
+「这是全新数据库」→ 重新建表（IF NOT EXISTS，所以不报错）→ 调用 onCreate 回调
+      ↓ 于是种子数据被再写一遍
+内置分类 28 → 56，每个都重复一份；账目数据完好无损
+```
+
+**表面上完全看不出问题**——应用能启动、能记账、账目都在，只有去数分类才会发现翻倍了。
+本次是靠「升级验证时导出一份备份、数 JSON 里的分类数」才抓到的。
+
+修法是在导出后手动补上，并把版本号纳入副本校验：
+
+```kotlin
+val schemaVersion = readUserVersion(source)
+source.rawQuery("SELECT sqlcipher_export('encrypted')", emptyArray()).use { it.moveToFirst() }
+source.execSQL("PRAGMA encrypted.user_version = $schemaVersion")
+```
+
+对应的回归测试见 `DatabaseEncryptionTest.migration_preserves_the_room_schema_version`。
+
+### 打开明文库不能用空字符串口令
+
+SQLCipher 能读明文库，但**入口选错会以完全无关的错误失败**：
+
+```kotlin
+// ✗ 读明文库看起来正常，但随后的 ATTACH ... KEY 会失败：
+//   SQLiteCantOpenDatabaseException: unable to open database: ... (code 14)
+SQLiteDatabase.openDatabase(path, "", null, OPEN_READWRITE, null)
+
+// ✓ 完全不设口令的入口
+SQLiteDatabase.openOrCreateDatabase(File(path), null)
+```
+
+`SQLITE_CANTOPEN(14)` 说的是「目标文件打不开」，而真正的原因在源连接上，
+错误信息完全指不到方向。当时是写了一个把 5 种候选写法各跑一遍的诊断测试，
+让结果自己说话才定位到的——比继续猜快得多。
+
+### rawExecSQL 会吞掉错误
+
+`rawExecSQL` 不抛异常。SQL 失败时它什么都不做，表现就是「加密副本没生成」这种
+毫无线索的结果。改用 `execSQL`（ATTACH/DETACH）与 `rawQuery(...).moveToFirst()`
+（导出函数），错误才会浮出来。
+
+顺带一提：`sqlcipher_export` 是**返回结果集的函数**，必须真的执行到取行那一步；
+只 prepare 不取行的话导出不会发生。
+
+### ATTACH 不支持绑定参数
+
+`ATTACH DATABASE ? AS x KEY ?` 是不行的，只能拼字符串。所以迁移口令特意用
+**十六进制**表示（只含 `0-9a-f`，不可能出现引号），从根本上消除注入面；
+路径仍显式做一次 `'` → `''` 转义作为纵深防御。
+
+### 内存库也要走同一个驱动
+
+`buildInMemory()` 如果继续用明文驱动，156 个插桩测试就**全部跑在另一条实现上**，
+加密相关的回归一个都测不到。所以内存库同样接 SQLCipher——代价是测试慢一点，
+换来的是「测试跑的就是生产路径」。
+
+### SQLCipher 的体积代价
+
+`lib/` 4 套 ABI 合计约 7.4 MB，release 包从 1.82 MB 涨到 **9.19 MB**。
+若要瘦身，去掉 x86/x86_64（只留 ARM）可省约 4.4 MB，但模拟器就跑不了 release 包了。
+
+### 验证升级要用「数出来」的方式，不能只看「能打开」
+
+本次升级验证的教训：一开始只确认了「应用能启动、账目还在」，那**足以漏掉分类翻倍**。
+有效的做法是升级前后各导出一份备份，逐项比对：
+
+```python
+# 分类数、账目数、是否有重名、按方向分布
+print(len(cats), len(d['transactions']))
+print([n for n, c in Counter(c['name'] for c in cats).items() if c > 1])
+```
+
+「数据没丢」和「数据没被改错」是两件事，升级验证要把后者也测到。
+
 ### 装过 release 包之后，debug 包会装不上
 
 ```
@@ -544,15 +647,29 @@ adb uninstall com.moneytracker.app.test
 ## 十四、release 构建与签名
 
 release 包开启 R8（`isMinifyEnabled` + `isShrinkResources`）后体积从 debug 的 13.57 MB
-降到 **1.82 MB**。
+降到 **1.82 MB**（v1.3 加入 SQLCipher 后为 9.19 MB，原因见第十七节）。
 
-签名材料放在项目根目录，**不提交到版本库**（`.gitignore` 已排除 `keystore.properties`、
-`*.jks`、`*.keystore`）：
+### 密钥放在工程目录之外（v1.3 起）
+
+签名材料放在 **`%USERPROFILE%\.android-keys\moneytracker\`**，不在工程目录里：
 
 | 文件 | 说明 |
 |---|---|
-| `keystore.properties` | 口令与别名，被 `app/build.gradle.kts` 读取 |
+| `keystore.properties` | 口令与别名 |
 | `moneytracker-release.jks` | PKCS12 格式，RSA 2048 |
+
+`app/build.gradle.kts` 按这个顺序查找，所以整套密钥目录可以整体搬走：
+
+1. `-Pkeystore.properties=<路径>`（CI 用）
+2. `%USERPROFILE%\.android-keys\moneytracker\keystore.properties`（推荐）
+3. `<工程根>/keystore.properties`（兼容旧布局）
+
+**为什么移出去**：密钥只要躺在工程目录里，就迟早会被某个打包命令一起带走。
+本项目就出过一次——分发的 `.rar` 里同时含私钥、明文口令与 debug 包，
+拿到的人可以签出被系统认可的「升级包」。`.gitignore` 管不住 `.rar`，
+所以真正的防线是**让密钥根本不在待打包的目录里**，再加 `tools/make-dist.ps1` 做复核。
+
+> 这个目录必须单独备份。丢了它，已安装的用户永远无法再收到升级（自签分发无法平滑换签）。
 
 ```powershell
 keytool -genkeypair -v -keystore moneytracker-release.jks -storetype PKCS12 `
@@ -599,7 +716,7 @@ $env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
 $env:ANDROID_HOME = 'D:\Android\Sdk'
 ```
 
-当前测试规模：**299 个 JVM 单元测试 + 142 个插桩测试**。
+当前测试规模：**322 个 JVM 单元测试 + 158 个插桩测试**。
 
 ```powershell
 & .\gradlew.bat :app:testDebugUnitTest          # 单元测试
