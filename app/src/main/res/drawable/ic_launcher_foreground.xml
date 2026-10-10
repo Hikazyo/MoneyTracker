@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  自适应图标前景：一个「¥」符号。
+
+  用描边路径画出「¥」（两条斜臂 + 一竖 + 两横），而不是放文字：
+  矢量图里没有文字排版能力，用路径画既可控又能保证任意尺寸下锐利。
+
+  内容控制在 18..90 的安全区内，避免被各厂商的图标遮罩裁掉。
+  同一个 drawable 也用作 monochrome（Android 13+ 主题图标）——它只取 alpha 通道，
+  所以描边用什么颜色都不影响。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 两条斜臂，交于 (54,53) -->
+    <path
+        android:pathData="M38,35 L54,53 L70,35"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!-- 竖 -->
+    <path
+        android:pathData="M54,53 L54,73"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="7"
+        android:strokeLineCap="round" />
+
+    <!-- 两横 -->
+    <path
+        android:pathData="M42,60 L66,60"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="6"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M42,68 L66,68"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="6"
+        android:strokeLineCap="round" />
+</vector>

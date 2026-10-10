@@ -1,0 +1,28 @@
+*.iml
+.gradle
+.kotlin
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+# 注意要写成 build/ 而不是 /build：后者只匹配根目录，
+# app/build（构建产物，几百 MB）会照样被提交进去
+build/
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# 发布签名：密钥库与密码文件绝不能进版本库。
+# 一旦推上去，任何人都能用它伪造升级包，而且删除文件也没用——历史里还在。
+keystore.properties
+*.jks
+*.keystore
+
+# 构建出来的安装包不进仓库；要发给别人请用 GitHub Releases
+*.apk
+*.aab

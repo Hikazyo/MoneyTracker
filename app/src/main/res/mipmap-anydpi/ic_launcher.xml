@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  API 24–25 的回退图标。
+
+  这里用 layer-list 间接引用矢量图，而不是把矢量内容复制一份：
+  mipmap 目录下不能放带 android:src 的 <vector>，而 layer-list 引用 drawable 是合法的。
+
+  anydpi 不含版本限定符，对所有 API 生效；但 API 26+ 会用
+  mipmap-anydpi-v26/ic_launcher.xml 里的自适应图标覆盖它。
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@drawable/ic_launcher_legacy" />
+</layer-list>
