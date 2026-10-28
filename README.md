@@ -64,9 +64,8 @@ Kotlin 2.3.20 · Jetpack Compose · Room 3 版 schema · minSdk 24 / targetSdk 3
 
 ### 应用没有任何联网能力
 
-- **零权限**：合并后的发布清单里**没有任何一条 `uses-permission`**（只有 AndroidX 自动生成的一条 `signature` 级自定义权限，不授予任何系统能力）
-- **零网络代码**：全量检索 `java.net / URL / HttpURLConnection / OkHttp / Retrofit / Socket / WebView` → 0 命中
-- **零第三方 SDK**：依赖表里只有 androidx / Kotlin / KotlinX / SQLCipher，没有广告、统计、崩溃上报、推送
+- **零权限**：合并后的发布清单里**没有任何一条 `uses-permission`**（只有 AndroidX 自动生成的一条 `signature` 级自定义权限，不授予任何系统能力）。截图识别用的 ML Kit 会在它自己的清单里声明 `INTERNET` 与 `ACCESS_NETWORK_STATE`，构建时已用 `tools:node="remove"` 从合并结果中剔除——**没有 `INTERNET`，进程连 socket 都建不出来**
+- **第三方功能库只有两个**：SQLCipher（数据库加密）与 ML Kit 文字识别（**捆绑模型版**：模型随 APK 安装，识别全程在本机，不下载、不上传）。依赖表里没有广告、统计、崩溃上报、推送
 - **零日志泄露**：全部源码检索 `Log.d / println / printStackTrace` → 0 命中
 - **零对外共享**：没有 `ACTION_SEND`、没有剪贴板、没有外跳浏览器、没有 FileProvider
 

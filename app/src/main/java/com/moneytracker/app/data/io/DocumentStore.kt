@@ -2,6 +2,7 @@ package com.moneytracker.app.data.io
 
 import android.content.Context
 import android.net.Uri
+import android.provider.OpenableColumns
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
@@ -28,6 +29,14 @@ interface DocumentStore {
    * （微信 UTF-8、支付宝 GBK），先拿到字节才能做编码嗅探。
    */
   suspend fun readBytes(documentId: String): Result<ByteArray>
+
+  /**
+   * 文件的展示名，例如 `Screenshot_20261028_153409.jpg`。
+   *
+   * 只有截图记账用得到：截图里往往只写「10月24日」，年份只能从文件名补。
+   * 给了默认实现（返回 null），这样既有的测试替身不必全部改动。
+   */
+  suspend fun displayName(documentId: String): String? = null
 }
 
 /** 读到的文件超过体积上限。 */
@@ -74,6 +83,22 @@ class AndroidDocumentStore(private val context: Context) : DocumentStore {
             ?: throw IOException("无法打开输入流")
         stream.use { readBounded(it, MAX_DOCUMENT_BYTES) }
       }
+    }
+
+  override suspend fun displayName(documentId: String): String? =
+    withContext(Dispatchers.IO) {
+      runCatching {
+        requireScheme(documentId)
+        context.contentResolver
+          .query(
+            Uri.parse(documentId),
+            arrayOf(OpenableColumns.DISPLAY_NAME),
+            null,
+            null,
+            null,
+          )
+          ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+      }.getOrNull()
     }
 
   private fun requireScheme(documentId: String) {

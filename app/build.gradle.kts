@@ -49,8 +49,8 @@ android {
         applicationId = "com.moneytracker.app"
         minSdk = 24
         targetSdk = 36
-        versionCode = 4
-        versionName = "1.3"
+        versionCode = 5
+        versionName = "1.4"
     }
 
     signingConfigs {
@@ -90,7 +90,15 @@ android {
             // 而几乎没有真实设备是 x86 的。
             ndk {
                 abiFilters.clear()
-                abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a"))
+                abiFilters.addAll(
+                    if (project.hasProperty("fullAbis")) {
+                        // 仅用于在 x86 模拟器上验证 **release 包**（R8 之后运行时是否正常）。
+                        // 发布时不要带这个参数：四套 ABI 会让包体从 24 MB 涨到 51 MB。
+                        listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+                    } else {
+                        listOf("arm64-v8a", "armeabi-v7a")
+                    }
+                )
             }
         }
     }

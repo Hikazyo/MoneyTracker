@@ -68,6 +68,7 @@ private val IMPORT_MIME_TYPES =
 fun SettingsScreen(
   onOpenCategories: () -> Unit,
   onOpenAbout: () -> Unit,
+  onOpenScreenshotImport: () -> Unit,
   modifier: Modifier = Modifier,
   repository: LedgerRepository = rememberLedgerRepository(),
 ) {
@@ -120,6 +121,7 @@ fun SettingsScreen(
     state = state,
     onOpenCategories = onOpenCategories,
     onOpenAbout = onOpenAbout,
+    onOpenScreenshotImport = onOpenScreenshotImport,
     importBusy = importState.isBusy,
     importMessage = importState.message,
     onPickImportFile = { importLauncher.launch(IMPORT_MIME_TYPES) },
@@ -184,6 +186,7 @@ internal fun SettingsContent(
   modifier: Modifier = Modifier,
   onOpenCategories: () -> Unit = {},
   onOpenAbout: () -> Unit = {},
+  onOpenScreenshotImport: () -> Unit = {},
   importBusy: Boolean = false,
   importMessage: String? = null,
   onPickImportFile: () -> Unit = {},
@@ -218,6 +221,17 @@ internal fun SettingsContent(
         tag = "import-bill",
         enabled = !state.isBusy && !importBusy,
         onClick = onPickImportFile,
+      )
+
+      ActionCard(
+        title = "从截图记账",
+        description =
+          "选择微信、支付宝或银行的账单截图，本机识别后确认入库。识别不联网、也不需要任何权限；" +
+            "同一张截图重复导入不会重复记账。",
+        buttonText = "打开",
+        tag = "screenshot-entry",
+        enabled = !state.isBusy && !importBusy,
+        onClick = onOpenScreenshotImport,
       )
 
       ActionCard(

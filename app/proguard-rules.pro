@@ -36,3 +36,25 @@
 # ---------- 保留行号，便于线上崩溃定位 ----------
 -keepattributes SourceFile,LineNumberTable
 -renamesourcefileattribute SourceFile
+
+# ---------- ML Kit 文字识别（截图记账，v1.4） ----------
+#
+# **这些规则不能删。** 实测症状：debug 包（不混淆）一切正常，但 release 包
+# 一进「截图记账」就整进程崩溃：
+#
+#   java.lang.NullPointerException: Attempt to read from field 'u7.g u7.f.a'
+#     on a null object reference in method 'void f8.k.<init>(int)'
+#     ... com.google.android.gms.internal.mlkit_vision_text_bundled_common.oc.i
+#
+# ML Kit 的模型/组件注册表靠静态初始化与反射建立，R8 把这些内部类当作无用代码
+# 裁掉或重排之后，注册表里就是 null。它的 AAR 自带 consumer 规则并不覆盖全部内部类，
+# 因此这里整包保留。代价是 dex 大一点，但相对模型 .so 可以忽略。
+-keep class com.google.mlkit.** { *; }
+-keep class com.google.android.gms.internal.mlkit_vision_text_bundled_common.** { *; }
+-keep class com.google.android.gms.internal.mlkit_vision_text_common.** { *; }
+-keep class com.google.android.gms.internal.mlkit_vision_common.** { *; }
+-keep class com.google.android.gms.internal.mlkit_vision_barcode_bundled.** { *; }
+-keep class com.google.android.gms.common.** { *; }
+-keep class com.google.android.gms.tasks.** { *; }
+-dontwarn com.google.mlkit.**
+-dontwarn com.google.android.gms.**

@@ -733,3 +733,80 @@ Get-ChildItem 'app\build\test-results\testDebugUnitTest' -Filter *.xml | ForEach
 }
 "$total 个用例, $fail 失败"
 ```
+
+---
+
+## 十八、截图识别（v1.4）踩到的坑
+
+### 18.1 R8 会把 ML Kit 裁坏，而 debug 包完全看不出来
+
+症状：debug 包一切正常，release 包一进「截图记账」就**整进程崩溃**：
+
+```
+java.lang.NullPointerException: Attempt to read from field 'u7.g u7.f.a'
+  on a null object reference in method 'void f8.k.<init>(int)'
+  ... com.google.android.gms.internal.mlkit_vision_text_bundled_common.oc.i
+```
+
+ML Kit 的组件注册表靠静态初始化 + 反射建立，R8 把内部类裁掉/重排后注册表里就是 null。
+它的 AAR 自带 consumer 规则**不覆盖全部内部类**。解决办法是在 `proguard-rules.pro` 里整包保留
+`com.google.mlkit.**` 与 `com.google.android.gms.internal.mlkit_vision_*`。
+
+**验证方法（必须做）**：release 默认只发 ARM，x86 模拟器装不上，所以加了一个开关：
+
+```powershell
+.\gradlew.bat :app:assembleRelease -PfullAbis   # 含 x86，仅用于验证
+adb install -r app\build\outputs\apk\release\app-release.apk
+# 然后在设备上真的走一遍功能，看 logcat -b crash
+```
+
+**教训**：「release 构建通过」不等于「release 能跑」。凡是引入新的反射/代码生成类库，
+都要用这个方式实测一次。
+
+### 18.2 ML Kit 会偷偷带进 INTERNET 权限
+
+`com.google.mlkit:text-recognition-chinese` 的 AAR 清单声明了 `INTERNET` 与
+`ACCESS_NETWORK_STATE`。捆绑模型运行时并不需要网络，因此用：
+
+```xml
+<uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
+<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove" />
+```
+
+剔除后**识别仍然正常**（实测 4/4 张样例）。发布前用 `aapt2 dump permissions` 复核，
+期望只剩 AndroidX 那条 signature 级自定义权限。
+
+### 18.3 FLAG_SECURE 让 `adb shell screencap` 全黑
+
+用 adb 驱动界面做验证时，`screencap` 拿到的是**全黑图**——因为本应用设了 `FLAG_SECURE`
+（v1.3 的加固）。这不是命令坏了。
+
+手工验证请改用 `uiautomator dump` 读文本：
+
+```powershell
+adb shell uiautomator dump /sdcard/ui.xml
+adb shell cat /sdcard/ui.xml
+```
+
+另外 `adb logcat` 里的中文如果被控制台编码破坏，改用设备端落盘再 pull：
+`adb shell "logcat -d -s TAG > /sdcard/x.log"` 然后 `adb pull`。
+
+### 18.4 Kotlin 支持嵌套块注释，KDoc 里写路径会出事
+
+在 KDoc 里写 `` `ocr/*.txt` `` 会引入 `/*`，Kotlin 把它当成**嵌套注释开始**，
+于是该注释永不闭合，文件后半段全被吞掉。报错却指向别处（`Unresolved reference`、
+`Syntax error: Missing '}'`），极难定位。
+
+写文档注释时避免出现 `/*` 序列，用「ocr 目录下的 txt」这类说法代替。
+
+### 18.5 账单截图上的 OCR 变体（解析层必须容忍）
+
+| 原样 | 识别成 | 后果（若不处理） |
+|---|---|---|
+| `-¥14.98` | `一¥14.98` | 支出变收入，静默错账 |
+| `余额:¥2,261.37` | `余額` / `余颌` / `余颤` | 余额被当成一笔账目 |
+| `储蓄卡3306 11:47` | `储蓄卡330611:47` | 时间匹配不上，静默变成 00:00 |
+| 图标 + 商户 | `0秋夫` / `8瑞幸咖啡` | 商户名带前缀垃圾字符 |
+| `昨天 09:22` | `I# 09:22` | 相对日期彻底丢失 |
+
+具体判据见 `data/ocr/` 各文件的注释与 `ScreenshotParserTest`。

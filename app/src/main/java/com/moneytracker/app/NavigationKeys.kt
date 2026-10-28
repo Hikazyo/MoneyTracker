@@ -23,3 +23,6 @@ import kotlinx.serialization.Serializable
 
 /** 记一笔 / 编辑账目。[entryId] 为 null 表示新增，否则为编辑（决策 3）。 */
 @Serializable data class EditEntryRoute(val entryId: Long? = null) : NavKey
+
+/** 截图记账页（v1.4）。 */
+@Serializable data object ScreenshotImportRoute : NavKey

@@ -36,6 +36,7 @@ class SettingsContentTest {
     onPickImportFile: () -> Unit = {},
     onOpenCategories: () -> Unit = {},
     onOpenAbout: () -> Unit = {},
+    onOpenScreenshotImport: () -> Unit = {},
   ) {
     composeTestRule.setContent {
       MoneyTrackerTheme {
@@ -51,6 +52,7 @@ class SettingsContentTest {
           onPickImportFile = onPickImportFile,
           onOpenCategories = onOpenCategories,
           onOpenAbout = onOpenAbout,
+          onOpenScreenshotImport = onOpenScreenshotImport,
         )
       }
     }
@@ -105,8 +107,20 @@ class SettingsContentTest {
     var opened = 0
     setContent(onOpenCategories = { opened++ })
 
-    composeTestRule.onNodeWithText("分类管理").assertIsDisplayed()
-    composeTestRule.onNodeWithTag("manage-categories").performClick()
+    // v1.4 新增「从截图记账」卡片后，分类管理已不在首屏，需要先滚动
+    composeTestRule.onNodeWithText("分类管理").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithTag("manage-categories").performScrollTo().performClick()
+
+    assertEquals(1, opened)
+  }
+
+  @Test
+  fun screenshot_entry_is_listed_and_clickable() {
+    var opened = 0
+    setContent(onOpenScreenshotImport = { opened++ })
+
+    composeTestRule.onNodeWithText("从截图记账").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithTag("screenshot-entry").performScrollTo().performClick()
 
     assertEquals(1, opened)
   }

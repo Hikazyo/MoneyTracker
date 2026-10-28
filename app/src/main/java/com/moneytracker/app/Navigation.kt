@@ -19,6 +19,7 @@ import com.moneytracker.app.ui.budget.BudgetScreen
 import com.moneytracker.app.ui.categories.CategoryManagementScreen
 import com.moneytracker.app.ui.edit.EditEntryScreen
 import com.moneytracker.app.ui.ledger.LedgerScreen
+import com.moneytracker.app.ui.screenshots.ScreenshotImportScreen
 import com.moneytracker.app.ui.settings.AboutScreen
 import com.moneytracker.app.ui.settings.SettingsScreen
 import com.moneytracker.app.ui.statistics.StatisticsScreen
@@ -92,10 +93,14 @@ fun MainNavigation() {
               SettingsScreen(
                 onOpenCategories = { backStack.add(CategoriesRoute) },
                 onOpenAbout = { backStack.add(AboutRoute) },
+                onOpenScreenshotImport = { backStack.add(ScreenshotImportRoute) },
               )
             }
             entry<CategoriesRoute> { CategoryManagementScreen(onBack = { backStack.removeLastOrNull() }) }
             entry<AboutRoute> { AboutScreen(onBack = { backStack.removeLastOrNull() }) }
+            entry<ScreenshotImportRoute> {
+              ScreenshotImportScreen(onBack = { backStack.removeLastOrNull() })
+            }
             entry<EditEntryRoute> { route ->
               EditEntryScreen(entryId = route.entryId, onDone = { backStack.removeLastOrNull() })
             }
