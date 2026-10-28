@@ -1,5 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!--
+      截图记账用的 ML Kit 会在它的 AAR 清单里声明 INTERNET 与 ACCESS_NETWORK_STATE，
+      但本项目用的是**捆绑模型**，识别全程在本机完成，运行时不需要网络。
+
+      这里强行从合并清单里剔除这两个权限，不是「消除警告」，而是把
+      「不会上传你的数据」从一句声明变成**系统层面无法做到**：
+      没有 INTERNET 权限，进程连 socket 都创建不出来。
+
+      复核方式（发布前必做）：
+        aapt2 dump permissions app-release.apk
+      期望只剩 DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION（AndroidX 自动生成的 signature 级权限）。
+    -->
+    <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove" />
 
     <!--
       备份策略：账本**不参与**系统备份与换机迁移。

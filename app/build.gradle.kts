@@ -81,6 +81,17 @@ android {
                 } else {
                     signingConfigs.getByName("debug")
                 }
+            // 截图识别用的 ML Kit 捆绑模型带的是 native 库，而 native 库**不压缩**，
+            // 四套 ABI 会让包体多出 41 MB（实测 9.19 MB → 50.71 MB）。
+            // 只发 ARM：覆盖几乎所有真实手机，包体落在 24 MB 左右。
+            //
+            // debug 刻意不裁：x86_64 模拟器要能装、要能跑插桩测试。
+            // 代价是 x86 设备装不了 release 包——本项目本来就只通过 GitHub Releases 分发 APK，
+            // 而几乎没有真实设备是 x86 的。
+            ndk {
+                abiFilters.clear()
+                abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a"))
+            }
         }
     }
     compileOptions {
@@ -175,4 +186,9 @@ dependencies {
 
   // 备份文件的序列化（插件已在 plugins 块中应用）
   implementation(libs.kotlinx.serialization.json)
+
+  // 截图记账：本机文字识别。捆绑模型，因此**运行时不联网**。
+  // 注意：它的 AAR 清单会带进 INTERNET / ACCESS_NETWORK_STATE，已在 AndroidManifest.xml
+  // 里用 tools:node="remove" 剔除（见 DESIGN.md §十二「权限与体积」）。
+  implementation(libs.mlkit.text.recognition.chinese)
 }
