@@ -28,6 +28,9 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 
 # 绝不允许出现在分发包里的内容
 $forbiddenNamePatterns = @(
+    # 交接文档只属于本机：里面记了本机路径、凭证位置与事故细节。
+    # 它没进版本库（.git/info/exclude），但本脚本扫的是整个工作目录，所以必须在这里排除。
+    'HANDOFF.md',
     'keystore.properties',
     'keystore-password.txt',
     'local.properties',
@@ -60,7 +63,7 @@ function Test-Forbidden([string]$relativePath) {
 }
 
 function Test-Sensitive([string]$reason) {
-    return $reason -match 'keystore|\.jks|\.keystore|\.apk|\.aab|password'
+    return $reason -match 'keystore|\.jks|\.keystore|\.apk|\.aab|password|HANDOFF'
 }
 
 Write-Host 'Scanning project...' -ForegroundColor Cyan
